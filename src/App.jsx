@@ -11,7 +11,7 @@ import {
 import { 
   Play, Pause, Volume2, Maximize, LogOut, Upload, 
   Search, Plus, X, List, Share2, Film, Lock, Image as ImageIcon,
-  ExternalLink, ChevronRight, Check, Youtube, Trash2, Pencil
+  ExternalLink, ChevronRight, Check, Youtube, Trash2, Pencil, Facebook, Video, Filter
 } from 'lucide-react';
 
 // --- 設定區域 ---
@@ -37,13 +37,56 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'video-app';
 const ADMIN_USER = "admin";
 const ADMIN_PASS = "password123";
 
-// --- Helper Functions ---
+// --- Helper Functions: Multi-Platform Support ---
 
-const getYouTubeID = (url) => {
+const getEmbedInfo = (url) => {
   if (!url) return null;
-  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-  const match = url.match(regExp);
-  return (match && match[2].length === 11) ? match[2] : null;
+
+  // 1. YouTube
+  const ytRegExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const ytMatch = url.match(ytRegExp);
+  if (ytMatch && ytMatch[2].length === 11) {
+    return { 
+      type: 'youtube', 
+      src: `https://www.youtube.com/embed/${ytMatch[2]}?autoplay=1`,
+      id: ytMatch[2]
+    };
+  }
+
+  // 2. Vimeo
+  const vimeoRegExp = /(?:www\.|player\.)?vimeo.com\/(?:channels\/(?:\w+\/)?|groups\/(?:[^\/]*)\/videos\/|album\/(?:\d+)\/video\/|video\/|)(\d+)(?:[a-zA-Z0-9_\-]+)?/i;
+  const vimeoMatch = url.match(vimeoRegExp);
+  if (vimeoMatch && vimeoMatch[1]) {
+    return {
+      type: 'vimeo',
+      src: `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=1`
+    };
+  }
+
+  // 3. Facebook (需為公開影片)
+  if (url.includes('facebook.com') || url.includes('fb.watch')) {
+    // FB 需要將網址編碼後放入 src
+    const encodedUrl = encodeURIComponent(url);
+    return {
+      type: 'facebook',
+      src: `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&show_text=false&t=0&autoplay=1`
+    };
+  }
+
+  // 4. TikTok (需為公開影片)
+  if (url.includes('tiktok.com')) {
+    // TikTok 嵌入比較複雜，這裡使用影片 ID 嘗試嵌入
+    const videoIdMatch = url.match(/video\/(\d+)/);
+    if (videoIdMatch && videoIdMatch[1]) {
+        return {
+            type: 'tiktok',
+            src: `https://www.tiktok.com/embed/v2/${videoIdMatch[1]}?lang=zh-Hant-TW`
+        }
+    }
+  }
+
+  // 5. Default MP4/WebM
+  return { type: 'native', src: url };
 };
 
 const getYouTubeThumbnail = (id) => {
@@ -71,7 +114,7 @@ const LoginScreen = ({ onLogin }) => {
       <div className="bg-gray-800 p-6 md:p-8 rounded-lg shadow-xl w-full max-w-sm border border-gray-700">
         <div className="flex justify-center mb-6">
           <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center">
-            <Youtube className="w-8 h-8 text-white" />
+            <Film className="w-8 h-8 text-white" />
           </div>
         </div>
         <h2 className="text-2xl font-bold text-center mb-6">管理員登入</h2>
@@ -271,11 +314,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans pb-10">
-      {/* 導覽列：響應式設計 */}
+      {/* 導覽列 */}
       <nav className="bg-gray-800 border-b border-gray-700 sticky top-0 z-30 shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            {/* Logo 區域：在手機上可能需要彈性縮小 */}
             <div className="flex items-center gap-2 cursor-pointer flex-shrink-0 mr-4" onClick={() => {
                 if (!isSharedMode) {
                   setActiveTab('home');
@@ -296,7 +338,6 @@ export default function App() {
               </span>
             </div>
 
-            {/* 電腦版中間搜尋列 (分享模式隱藏) */}
             {!isSharedMode && (
               <div className="flex-1 max-w-md mx-4 hidden md:block">
                 <div className="relative">
@@ -314,7 +355,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 右側按鈕區：手機版改為橫向捲動，避免擠壓 */}
             {!isSharedMode && (
               <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-2 -mr-4 pr-4 md:mr-0 md:pr-0 md:overflow-visible">
                 <button 
@@ -347,7 +387,6 @@ export default function App() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* 手機版搜尋列 (分享模式隱藏) */}
         {!isSharedMode && (
           <div className="md:hidden mb-6">
             <div className="relative">
@@ -365,16 +404,42 @@ export default function App() {
           </div>
         )}
 
+        {/* 播放清單管理介面 */}
         {activeTab === 'playlists' && !isSharedMode && (
           <PlaylistManager 
             videos={videos} 
             playlists={playlists} 
             appId={appId}
+            allTags={allTags} // 傳入標籤供過濾用
           />
         )}
 
+        {/* 影片列表 (Home 或 Shared) */}
         {(activeTab === 'home' || activeTab === 'shared') && (
           <>
+            {/* 分享模式下的說明與標題 */}
+            {isSharedMode && sharedPlaylistData && (
+                <div className="mb-8 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                    <div className="p-6 md:p-8">
+                        <div className="flex flex-col gap-4">
+                            <div>
+                                <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">{sharedPlaylistData.title}</h1>
+                                <div className="h-1 w-20 bg-red-600 rounded-full mb-4"></div>
+                                {sharedPlaylistData.description && (
+                                    <p className="text-gray-300 text-base md:text-lg leading-relaxed whitespace-pre-wrap">
+                                        {sharedPlaylistData.description}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                                <List className="w-4 h-4" />
+                                <span>共 {filteredVideos.length} 部影片</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* 標籤過濾器 (分享模式隱藏) */}
             {!isSharedMode && allTags.length > 0 && (
               <div className="mb-6 overflow-x-auto no-scrollbar pb-2">
@@ -418,7 +483,6 @@ export default function App() {
         )}
       </main>
 
-      {/* RWD Modals */}
       {showUploadModal && (
         <UploadModal 
           onClose={() => { setShowUploadModal(false); setVideoToEdit(null); }} 
@@ -439,17 +503,14 @@ export default function App() {
 }
 
 const VideoCard = ({ video, onClick, isAdmin, onDelete, onEdit }) => {
-  const isYoutube = getYouTubeID(video.url);
+  const embedInfo = getEmbedInfo(video.url);
+  const isYoutube = embedInfo?.type === 'youtube';
   
   return (
     <div 
       className="bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300 group cursor-pointer border border-gray-700 flex flex-col h-full relative"
       onClick={onClick}
     >
-      {/* 管理按鈕：
-         在手機上 (md:hidden) 直接顯示 opacity-100，方便操作
-         在電腦上 (hidden md:flex) 預設 opacity-0，hover 才顯示
-      */}
       {isAdmin && (
         <div className="absolute top-2 left-2 z-20 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200">
           <button
@@ -480,11 +541,15 @@ const VideoCard = ({ video, onClick, isAdmin, onDelete, onEdit }) => {
             <Play className="w-8 h-8 text-white fill-current pl-1" />
           </div>
         </div>
-        {isYoutube && (
-           <div className="absolute top-2 right-2 bg-red-600 text-white text-xs px-2 py-1 rounded flex items-center gap-1 shadow-sm">
-             <Youtube className="w-3 h-3" /> <span className="hidden xs:inline">YouTube</span>
-           </div>
-        )}
+        
+        {/* 平台標籤 */}
+        <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1 shadow-sm backdrop-blur-sm">
+             {embedInfo?.type === 'youtube' && <><Youtube className="w-3 h-3 text-red-500" /> YouTube</>}
+             {embedInfo?.type === 'facebook' && <><Facebook className="w-3 h-3 text-blue-500" /> Facebook</>}
+             {embedInfo?.type === 'vimeo' && <><Video className="w-3 h-3 text-blue-400" /> Vimeo</>}
+             {embedInfo?.type === 'tiktok' && <><span className="font-bold text-pink-500">♪</span> TikTok</>}
+             {embedInfo?.type === 'native' && <><Film className="w-3 h-3 text-gray-300" /> Video</>}
+        </div>
       </div>
       <div className="p-4 flex flex-col flex-1">
         <h3 className="text-lg font-semibold text-white line-clamp-2 mb-1 group-hover:text-red-400 transition-colors">
@@ -507,7 +572,8 @@ const PlayerModal = ({ video, onClose }) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  const youtubeID = getYouTubeID(video.url);
+  const embedInfo = getEmbedInfo(video.url);
+  const isNative = embedInfo?.type === 'native';
 
   const togglePlay = () => {
     if (videoRef.current) {
@@ -546,7 +612,6 @@ const PlayerModal = ({ video, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-0 md:p-4">
-      {/* 手機版全螢幕，電腦版維持卡片 */}
       <div className="w-full h-full md:h-auto md:max-h-[95vh] max-w-5xl bg-gray-900 md:rounded-xl overflow-hidden shadow-2xl flex flex-col">
         <div className="flex justify-between items-center p-3 border-b border-gray-800 shrink-0">
           <h2 className="text-lg font-bold text-white truncate pr-4">{video.title}</h2>
@@ -555,16 +620,15 @@ const PlayerModal = ({ video, onClose }) => {
           </button>
         </div>
 
-        {/* 播放器區域：確保長寬比 */}
         <div className="relative bg-black flex-shrink-0 w-full aspect-video flex items-center justify-center group">
-          {youtubeID ? (
+          {!isNative ? (
             <iframe
               width="100%"
               height="100%"
-              src={`https://www.youtube.com/embed/${youtubeID}?autoplay=1`}
-              title="YouTube video player"
+              src={embedInfo?.src}
+              title="Video player"
               frameBorder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               className="w-full h-full"
             ></iframe>
@@ -591,8 +655,7 @@ const PlayerModal = ({ video, onClose }) => {
           )}
         </div>
 
-        {/* 原生播放器控制列 */}
-        {!youtubeID && (
+        {isNative && (
           <div className="p-3 bg-gray-800 shrink-0">
             <div className="flex items-center gap-3 mb-2">
               <span className="text-xs text-gray-400 w-8 text-right">{formatTime(currentTime)}</span>
@@ -622,7 +685,6 @@ const PlayerModal = ({ video, onClose }) => {
           </div>
         )}
         
-        {/* 說明區域：在手機上可以滾動 */}
         <div className="p-4 bg-gray-900 border-t border-gray-800 overflow-y-auto flex-1">
             <h4 className="text-sm font-semibold text-gray-300 mb-1">影片說明</h4>
             <p className="text-sm text-gray-400 whitespace-pre-wrap leading-relaxed">{video.description || "無描述"}</p>
@@ -652,9 +714,9 @@ const UploadModal = ({ onClose, appId, existingTags, videoToEdit }) => {
   }, [videoToEdit]);
 
   const handleUrlBlur = () => {
-    const ytId = getYouTubeID(videoUrl);
-    if (ytId && !thumbUrl) {
-      setThumbUrl(getYouTubeThumbnail(ytId));
+    const embedInfo = getEmbedInfo(videoUrl);
+    if (embedInfo?.type === 'youtube' && !thumbUrl) {
+      setThumbUrl(getYouTubeThumbnail(embedInfo.id));
     }
   };
 
@@ -742,7 +804,7 @@ const UploadModal = ({ onClose, appId, existingTags, videoToEdit }) => {
                 <input 
                   required
                   type="url" 
-                  placeholder="https://youtu.be/..."
+                  placeholder="支援 YT, FB, Vimeo, TikTok"
                   value={videoUrl}
                   onChange={e => setVideoUrl(e.target.value)}
                   onBlur={handleUrlBlur}
@@ -859,23 +921,30 @@ const UploadModal = ({ onClose, appId, existingTags, videoToEdit }) => {
   );
 };
 
-const PlaylistManager = ({ videos, playlists, appId }) => {
+const PlaylistManager = ({ videos, playlists, appId, allTags }) => {
   const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newDesc, setNewDesc] = useState(''); // 新增說明欄位
   const [selectedVideoIds, setSelectedVideoIds] = useState([]);
   const [justCopied, setJustCopied] = useState(null);
+  
+  // 標籤過濾功能
+  const [filterTag, setFilterTag] = useState(null);
 
   const handleCreate = async () => {
     if (!newTitle || selectedVideoIds.length === 0) return;
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'playlists'), {
         title: newTitle,
+        description: newDesc,
         videoIds: selectedVideoIds,
         createdAt: new Date().toISOString()
       });
       setShowCreate(false);
       setNewTitle('');
+      setNewDesc('');
       setSelectedVideoIds([]);
+      setFilterTag(null);
     } catch (e) {
       console.error(e);
       alert('建立失敗');
@@ -912,6 +981,12 @@ const PlaylistManager = ({ videos, playlists, appId }) => {
     }
   };
 
+  // 過濾顯示的影片
+  const displayedVideos = videos.filter(v => {
+    if (!filterTag) return true;
+    return v.tags?.includes(filterTag);
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -940,9 +1015,13 @@ const PlaylistManager = ({ videos, playlists, appId }) => {
               </div>
             </div>
             
-            <p className="text-gray-400 text-sm mb-4">
-              包含 {pl.videoIds?.length || 0} 部影片
+            <p className="text-gray-400 text-sm mb-4 line-clamp-2 min-h-[2.5rem]">
+              {pl.description || "無說明"}
             </p>
+            
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-4">
+               <Film className="w-3 h-3" /> {pl.videoIds?.length || 0} 部影片
+            </div>
 
             <div className="mt-auto">
               <button 
@@ -962,21 +1041,59 @@ const PlaylistManager = ({ videos, playlists, appId }) => {
           <div className="bg-gray-800 md:rounded-xl w-full h-full md:h-auto md:max-w-4xl p-4 md:p-6 border border-gray-700 max-h-[90vh] flex flex-col">
             <h2 className="text-xl font-bold mb-4 shrink-0">建立分享清單</h2>
             
-            <div className="mb-4 shrink-0">
-              <label className="block text-sm font-medium text-gray-400 mb-1">清單名稱</label>
-              <input 
-                type="text" 
-                value={newTitle}
-                onChange={e => setNewTitle(e.target.value)}
-                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-base"
-                placeholder="例如：精選動作片"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 shrink-0">
+                <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">清單名稱</label>
+                    <input 
+                        type="text" 
+                        value={newTitle}
+                        onChange={e => setNewTitle(e.target.value)}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-base"
+                        placeholder="例如：精選動作片"
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">清單說明 (選填)</label>
+                    <input 
+                        type="text" 
+                        value={newDesc}
+                        onChange={e => setNewDesc(e.target.value)}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-base"
+                        placeholder="簡單描述這個清單的內容..."
+                    />
+                </div>
             </div>
 
+            {/* 標籤過濾區 */}
+            {allTags.length > 0 && (
+                <div className="mb-4 shrink-0 overflow-x-auto no-scrollbar">
+                    <div className="flex gap-2 items-center">
+                        <span className="text-xs text-gray-400 flex items-center gap-1"><Filter className="w-3 h-3"/> 過濾：</span>
+                        <button
+                            onClick={() => setFilterTag(null)}
+                            className={`px-2 py-1 rounded-full text-xs transition-colors whitespace-nowrap ${!filterTag ? 'bg-white text-gray-900' : 'bg-gray-700 text-gray-300'}`}
+                        >
+                            全部
+                        </button>
+                        {allTags.map(tag => (
+                            <button
+                                key={tag}
+                                onClick={() => setFilterTag(tag === filterTag ? null : tag)}
+                                className={`px-2 py-1 rounded-full text-xs transition-colors whitespace-nowrap ${tag === filterTag ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}
+                            >
+                                {tag}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             <div className="flex-1 overflow-y-auto mb-4 border border-gray-700 rounded bg-gray-900/50 p-4 min-h-0">
-               <h3 className="text-sm text-gray-400 mb-3">勾選要加入的影片：</h3>
-               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {videos.map(v => (
+               <h3 className="text-sm text-gray-400 mb-3 sticky top-0 bg-gray-900/90 py-1 z-10 backdrop-blur-sm">
+                   勾選要加入的影片 ({displayedVideos.length})：
+               </h3>
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {displayedVideos.map(v => (
                     <div 
                       key={v.id} 
                       onClick={() => toggleSelect(v.id)}
@@ -991,6 +1108,9 @@ const PlaylistManager = ({ videos, playlists, appId }) => {
                       </div>
                     </div>
                   ))}
+                  {displayedVideos.length === 0 && (
+                      <div className="col-span-full text-center text-gray-500 py-4">沒有符合條件的影片</div>
+                  )}
                </div>
             </div>
 
